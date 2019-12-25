@@ -25,6 +25,7 @@ import { initCrossRequest } from 'client/components/Postman/CheckCrossInstall.js
 import produce from 'immer';
 import {InsertCodeMap} from 'client/components/Postman/Postman.js'
 
+const plugin = require('client/plugin.js');
 const {
   handleParams,
   crossRequest,
@@ -36,6 +37,7 @@ import CaseEnv from 'client/components/CaseEnv';
 import Label from '../../../../components/Label/Label.js';
 
 const Option = Select.Option;
+const createContext = require('common/createContext')
 
 import copy from 'copy-to-clipboard';
 
@@ -64,7 +66,8 @@ function handleReport(json) {
       token: state.project.token,
       envList: state.interfaceCol.envList,
       curProjectRole: state.project.currProject.role,
-      projectEnv: state.project.projectEnv
+      projectEnv: state.project.projectEnv,
+      curUid: state.user.uid
     };
   },
   {
@@ -98,7 +101,8 @@ class InterfaceColContent extends Component {
     getEnv: PropTypes.func,
     projectEnv: PropTypes.object,
     fetchCaseEnvList: PropTypes.func,
-    envList: PropTypes.array
+    envList: PropTypes.array,
+    curUid: PropTypes.number
   };
 
   constructor(props) {
@@ -308,8 +312,20 @@ class InterfaceColContent extends Component {
       validRes: []
     };
 
+    await plugin.emitHook('before_col_request', Object.assign({}, options, {
+      type: 'col',
+      caseId: options.caseId,
+      projectId: interfaceData.project_id,
+      interfaceId: interfaceData.interface_id
+    }));
+
     try {
-      let data = await crossRequest(options, interfaceData.pre_script, interfaceData.after_script);
+      let data = await crossRequest(options, interfaceData.pre_script, interfaceData.after_script, createContext(
+        this.props.curUid,
+        this.props.match.params.id,
+        interfaceData.interface_id
+      ));
+      options.taskId = this.props.curUid;
       let res = (data.res.body = json_parse(data.res.body));
       result = {
         ...options,
@@ -319,6 +335,13 @@ class InterfaceColContent extends Component {
         status: data.res.status,
         statusText: data.res.statusText
       };
+
+      await plugin.emitHook('after_col_request', result, {
+        type: 'col',
+        caseId: options.caseId,
+        projectId: interfaceData.project_id,
+        interfaceId: interfaceData.interface_id
+      });
 
       if (options.data && typeof options.data === 'object') {
         requestParams = {
@@ -675,7 +698,7 @@ class InterfaceColContent extends Component {
                       {' '}
                       每个用例都有唯一的key，用于获取所匹配接口的响应数据，例如使用{' '}
                       <a
-                        href="https://yapi.ymfe.org/documents/case.html#%E7%AC%AC%E4%BA%8C%E6%AD%A5%EF%BC%8C%E7%BC%96%E8%BE%91%E6%B5%8B%E8%AF%95%E7%94%A8%E4%BE%8B"
+                        href="https://hellosean1025.github.io/yapi/documents/case.html#%E7%AC%AC%E4%BA%8C%E6%AD%A5%EF%BC%8C%E7%BC%96%E8%BE%91%E6%B5%8B%E8%AF%95%E7%94%A8%E4%BE%8B"
                         className="link-tooltip"
                         target="blank"
                       >
@@ -994,7 +1017,7 @@ class InterfaceColContent extends Component {
               测试集合&nbsp;<a
                 target="_blank"
                 rel="noopener noreferrer"
-                href="https://yapi.ymfe.org/documents/case.html"
+                href="https://hellosean1025.github.io/yapi/documents/case.html"
               >
                 <Tooltip title="点击查看文档">
                   <Icon type="question-circle-o" />
@@ -1164,8 +1187,8 @@ class InterfaceColContent extends Component {
             </Row>
             <Row type="flex" justify="space-around" className="row" align="middle">
               <Col span={3} className="label">
-                邮件通知
-                <Tooltip title={'测试不通过时，会给项目组成员发送邮件'}>
+                消息通知
+                <Tooltip title={'测试不通过时，会给项目组成员发送消息通知'}>
                   <Icon
                     type="question-circle-o"
                     style={{

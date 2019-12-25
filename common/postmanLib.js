@@ -8,6 +8,7 @@ const axios = require('axios');
 const qs = require('qs');
 const CryptoJS = require('crypto-js');
 const jsrsasign = require('jsrsasign');
+const https = require('https');
 
 const isNode = typeof global == 'object' && global.global === global;
 const ContentTypeMap = {
@@ -18,6 +19,37 @@ const ContentTypeMap = {
   'text/html': 'html',
   other: 'text'
 };
+
+const getStorage = async (id)=>{
+  try{
+    if(isNode){
+      let storage = global.storageCreator(id);
+      let data = await storage.getItem();
+      return {
+        getItem: (name)=> data[name],
+        setItem: (name, value)=>{
+          data[name] = value;
+          storage.setItem(name, value)
+        }
+      }
+    }else{
+      return {
+        getItem: (name)=> window.localStorage.getItem(name),
+        setItem: (name, value)=>  window.localStorage.setItem(name, value)
+      }
+    }
+  }catch(e){
+    console.error(e)
+    return {
+      getItem: (name)=>{
+        console.error(name, e)
+      },
+      setItem: (name, value)=>{
+        console.error(name, value, e)
+      }
+    }
+  }
+}
 
 async function httpRequestByNode(options) {
   function handleRes(response) {
@@ -72,8 +104,11 @@ async function httpRequestByNode(options) {
       method: options.method,
       url: options.url,
       headers: options.headers,
-      timeout: 5000,
+      timeout: 10000,
       maxRedirects: 0,
+      httpsAgent: new https.Agent({
+        rejectUnauthorized: false
+      }),
       data: options.data
     });
     return handleRes(response);
@@ -145,7 +180,7 @@ function sandboxByNode(sandbox = {}, script) {
   script = new vm.Script(script);
   const context = new vm.createContext(sandbox);
   script.runInContext(context, {
-    timeout: 3000
+    timeout: 10000
   });
   return sandbox;
 }
@@ -203,12 +238,21 @@ function sandboxByBrowser(context = {}, script) {
   return context;
 }
 
-async function crossRequest(defaultOptions, preScript, afterScript) {
+/**
+ * 
+ * @param {*} defaultOptions 
+ * @param {*} preScript 
+ * @param {*} afterScript 
+ * @param {*} commonContext  负责传递一些业务信息，crossRequest 不关注具体传什么，只负责当中间人
+ */
+async function crossRequest(defaultOptions, preScript, afterScript, commonContext = {}) {
   let options = Object.assign({}, defaultOptions);
+  const taskId = options.taskId || Math.random() + '';
   let urlObj = URL.parse(options.url, true),
     query = {};
   query = Object.assign(query, urlObj.query);
   let context = {
+    isNode,
     get href() {
       return urlObj.href;
     },
@@ -235,8 +279,11 @@ async function crossRequest(defaultOptions, preScript, afterScript) {
     query: query,
     requestHeader: options.headers || {},
     requestBody: options.data,
-    promise: false
+    promise: false,
+    storage: await getStorage(taskId)
   };
+
+  Object.assign(context, commonContext)
 
   context.utils = Object.freeze({
     _: _,
@@ -391,7 +438,7 @@ function handleParams(interfaceData, handleValue, requestParams) {
       }
     }
   } catch (e) {
-    console.log('err', e);
+    console.error('err', e);
   }
 
   if (HTTP_METHOD[interfaceRunData.method].request_body) {
